@@ -40,7 +40,7 @@ let db: ReturnType<typeof openDatabaseSync> | null = null;
 
 export function getDatabase() {
   if (!db) {
-    db = openDatabaseSync("movilapp.db");
+    db = openDatabaseSync("matuteca.db");
   }
   return db;
 }

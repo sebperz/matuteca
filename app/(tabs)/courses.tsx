@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useLayoutEffect } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -8,16 +9,28 @@ import {
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useNavigation } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
 import { useCourseStore } from "../../src/stores/courseStore";
 import { useTheme } from "../../src/theme/theme";
-import { getAllCourses, deleteCourse } from "../../src/db/courses";
+import { getAllCourses, deleteCourse, courseExists } from "../../src/db/courses";
+import { parseMarkdown } from "../../src/parser";
+import { importOrReplaceCourse } from "../../src/import";
+import type { Course } from "../../src/parser";
 
 export default function Courses() {
   const { colors } = useTheme();
-  const { courses, setCourses, removeCourse } = useCourseStore();
+  const { courses, setCourses, addCourse, removeCourse } = useCourseStore();
   const router = useRouter();
+  const navigation = useNavigation();
+
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [showReplace, setShowReplace] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -39,6 +52,90 @@ export default function Courses() {
     setDeleteTarget(null);
   };
 
+  const handleImport = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets.length) return;
+
+      const asset = result.assets[0];
+      const content = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      const course = parseMarkdown(content);
+      setPreviewCourse(course);
+      setPreviewContent(content);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        Alert.alert("Error al importar", err.message);
+      } else {
+        Alert.alert("Error", "No se pudo leer el archivo.");
+      }
+    }
+  }, []);
+
+  const doInstall = useCallback(async () => {
+    if (!previewContent) return;
+    setImporting(true);
+    try {
+      const { course } = await importOrReplaceCourse(previewContent);
+      addCourse(course);
+      setPreviewCourse(null);
+      setPreviewContent(null);
+      setShowReplace(false);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        Alert.alert("Error al instalar", err.message);
+      } else {
+        Alert.alert("Error", "No se pudo instalar el curso.");
+      }
+    } finally {
+      setImporting(false);
+    }
+  }, [previewContent, addCourse]);
+
+  const handleInstall = useCallback(async () => {
+    if (!previewCourse) return;
+    const exists = await courseExists(previewCourse.source_id);
+    if (exists) {
+      setShowReplace(true);
+    } else {
+      doInstall();
+    }
+  }, [previewCourse, doInstall]);
+
+  const closePreview = useCallback(() => {
+    setPreviewCourse(null);
+    setPreviewContent(null);
+    setShowReplace(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (courses.length > 0) {
+      navigation.setOptions({
+        headerRight: () => (
+          <Pressable
+            onPress={handleImport}
+            hitSlop={8}
+            style={styles.headerButton}
+          >
+            <Ionicons name="add-outline" size={24} color={colors.primary} />
+          </Pressable>
+        ),
+      });
+    } else {
+      navigation.setOptions({ headerRight: undefined });
+    }
+  }, [navigation, colors.primary, courses.length, handleImport]);
+
+  const lessonCount = previewCourse
+    ? previewCourse.topics.reduce((acc, t) => acc + t.lessons.length, 0)
+    : 0;
+
   if (courses.length === 0) {
     return (
       <View style={[styles.empty, { backgroundColor: colors.background }]}>
@@ -48,6 +145,105 @@ export default function Courses() {
         <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
           Importa tu primer archivo .md para comenzar
         </Text>
+        <Pressable
+          style={[styles.importButton, { backgroundColor: colors.primary }]}
+          onPress={handleImport}
+        >
+          <Ionicons name="add-outline" size={20} color="#FFFFFF" />
+          <Text style={styles.importButtonText}>Importar curso</Text>
+        </Pressable>
+
+        <Modal
+          visible={previewCourse !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={closePreview}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+              {importing ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                    Instalando curso...
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>
+                    Vista previa
+                  </Text>
+                  <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.previewTitle, { color: colors.text }]}>
+                      {previewCourse?.title}
+                    </Text>
+                    <Text style={[styles.previewAuthor, { color: colors.textSecondary }]}>
+                      {previewCourse?.author}
+                    </Text>
+                    {previewCourse && (
+                      <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>
+                        {previewCourse.topics.length} temas · {lessonCount} lecciones
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
+                    {previewCourse?.version ? `Versión ${previewCourse.version}` : "Sin versión"}
+                  </Text>
+                  <View style={styles.modalActions}>
+                    <Pressable
+                      style={[styles.modalCancel, { borderColor: colors.border }]}
+                      onPress={closePreview}
+                    >
+                      <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                        Cancelar
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.modalInstall, { backgroundColor: colors.primary }]}
+                      onPress={handleInstall}
+                    >
+                      <Text style={styles.modalInstallText}>Instalar</Text>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showReplace}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowReplace(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Curso existente
+              </Text>
+              <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
+                Este curso ya está instalado. ¿Reemplazarlo? Tu progreso se conservará.
+              </Text>
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={[styles.modalCancel, { borderColor: colors.border }]}
+                  onPress={() => setShowReplace(false)}
+                >
+                  <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                    Cancelar
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalInstall, { backgroundColor: colors.primary }]}
+                  onPress={doInstall}
+                >
+                  <Text style={styles.modalInstallText}>Reemplazar</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -104,6 +300,98 @@ export default function Courses() {
                 onPress={handleDelete}
               >
                 <Text style={styles.modalDeleteText}>Eliminar curso</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={previewCourse !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closePreview}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+            {importing ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+                  Instalando curso...
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                  Vista previa
+                </Text>
+                <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Text style={[styles.previewTitle, { color: colors.text }]}>
+                    {previewCourse?.title}
+                  </Text>
+                  <Text style={[styles.previewAuthor, { color: colors.textSecondary }]}>
+                    {previewCourse?.author}
+                  </Text>
+                  {previewCourse && (
+                    <Text style={[styles.previewMeta, { color: colors.textSecondary }]}>
+                      {previewCourse.topics.length} temas · {lessonCount} lecciones
+                    </Text>
+                  )}
+                </View>
+                <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
+                  {previewCourse?.version ? `Versión ${previewCourse.version}` : "Sin versión"}
+                </Text>
+                <View style={styles.modalActions}>
+                  <Pressable
+                    style={[styles.modalCancel, { borderColor: colors.border }]}
+                    onPress={closePreview}
+                  >
+                    <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                      Cancelar
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalInstall, { backgroundColor: colors.primary }]}
+                    onPress={handleInstall}
+                  >
+                    <Text style={styles.modalInstallText}>Instalar</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showReplace}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowReplace(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Curso existente
+            </Text>
+            <Text style={[styles.modalBody, { color: colors.textSecondary }]}>
+              Este curso ya está instalado. ¿Reemplazarlo? Tu progreso se conservará.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalCancel, { borderColor: colors.border }]}
+                onPress={() => setShowReplace(false)}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                  Cancelar
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalInstall, { backgroundColor: colors.primary }]}
+                onPress={doInstall}
+              >
+                <Text style={styles.modalInstallText}>Reemplazar</Text>
               </Pressable>
             </View>
           </View>
@@ -199,5 +487,63 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 15,
     fontFamily: "Geist-SemiBold",
+  },
+  modalInstall: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalInstallText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontFamily: "Geist-SemiBold",
+  },
+  headerButton: {
+    marginRight: 4,
+    padding: 8,
+  },
+  importButton: {
+    marginTop: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+  },
+  importButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontFamily: "Geist-SemiBold",
+  },
+  loadingContainer: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 15,
+    fontFamily: "Geist",
+  },
+  previewCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginVertical: 8,
+  },
+  previewTitle: {
+    fontSize: 17,
+    fontFamily: "Geist-SemiBold",
+    marginBottom: 4,
+  },
+  previewAuthor: {
+    fontSize: 14,
+    fontFamily: "Geist",
+  },
+  previewMeta: {
+    fontSize: 13,
+    fontFamily: "Geist-Mono",
+    marginTop: 8,
   },
 });

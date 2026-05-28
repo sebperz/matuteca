@@ -2,7 +2,7 @@
 
 Version 1.0.0
 
-The MovilApp template is the canonical format for authoring courses. A course is a single `.md` file with YAML frontmatter, hierarchical markdown headings for structure, and YAML code blocks for interactive activities.
+The Matuteca template is the canonical format for authoring courses. A course is a single `.md` file with YAML frontmatter, hierarchical markdown headings for structure, and YAML code blocks for interactive activities.
 
 ---
 

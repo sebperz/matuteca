@@ -1,6 +1,6 @@
 # 0001 — Arquitectura local-first sin backend
 
-MovilApp usa SQLite local (`expo-sqlite`) como única fuente de verdad. No hay backend, autenticación ni sincronización en la nube en el MVP.
+Matuteca usa SQLite local (`expo-sqlite`) como única fuente de verdad. No hay backend, autenticación ni sincronización en la nube en el MVP.
 
 ## Por qué
 

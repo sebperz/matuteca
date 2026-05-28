@@ -144,7 +144,7 @@ export default function Profile() {
           Acerca de
         </Text>
         <View style={styles.aboutRow}>
-          <Text style={[styles.aboutText, { color: colors.text }]}>MovilApp</Text>
+          <Text style={[styles.aboutText, { color: colors.text }]}>Matuteca</Text>
           <Text style={[styles.aboutSecondary, { color: colors.textSecondary }]}>
             v1.0.0
           </Text>

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "movilapp",
-    "slug": "movilapp",
+    "name": "matuteca",
+    "slug": "matuteca",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -30,6 +30,6 @@
     "experiments": {
       "typedRoutes": true
     },
-    "scheme": "movilapp"
+    "scheme": "matuteca"
   }
 }

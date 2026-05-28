@@ -1,4 +1,4 @@
-# MovilApp
+# Matuteca
 
 Aplicación móvil open source para estudiar con cursos generados a partir de archivos de texto estructurados.
 
